@@ -13,9 +13,8 @@ const statusBadge = (s: string) => {
   return map[s] || { bg: '#f3f4f6', color: '#6b7280', label: s }
 }
 
-const supabase = createClient()
-
 export default function CandidatesPage() {
+  const supabase = createClient()
   const [candidates, setCandidates] = useState<Candidate[]>([])
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState({ current: 0, total: 0 })

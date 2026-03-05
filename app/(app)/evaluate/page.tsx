@@ -220,9 +220,8 @@ function Bucket({ label, color, evaluations, onSelect }: {
   )
 }
 
-const supabase = createClient()
-
 function EvaluatePageInner() {
+  const supabase = createClient()
   const searchParams = useSearchParams()
   const jobIdParam = searchParams.get('job_id')
 

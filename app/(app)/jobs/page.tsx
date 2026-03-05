@@ -5,9 +5,8 @@ import { JobAd } from '@/types'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 
-const supabase = createClient()
-
 export default function JobsPage() {
+  const supabase = createClient()
   const [jobs, setJobs] = useState<JobAd[]>([])
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)

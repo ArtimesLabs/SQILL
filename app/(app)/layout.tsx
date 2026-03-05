@@ -10,9 +10,8 @@ const NAV = [
   { href: '/evaluate', label: 'Evaluate', icon: '⚡' },
 ]
 
-const supabase = createClient()
-
 export default function AppLayout({ children }: { children: React.ReactNode }) {
+  const supabase = createClient()
   const router = useRouter()
   const pathname = usePathname()
   const [user, setUser] = useState<{ email?: string } | null>(null)
