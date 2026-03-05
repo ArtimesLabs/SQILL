@@ -10,10 +10,11 @@ const NAV = [
   { href: '/evaluate', label: 'Evaluate', icon: '⚡' },
 ]
 
+const supabase = createClient()
+
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const pathname = usePathname()
-  const supabase = createClient()
   const [user, setUser] = useState<any>(null)
 
   useEffect(() => {
@@ -21,7 +22,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       if (!user) router.push('/login')
       else setUser(user)
     })
-  }, [])
+  }, [router])
 
   const signOut = async () => {
     await supabase.auth.signOut()

@@ -59,8 +59,11 @@ export async function POST(req: NextRequest) {
       const pdfData = await pdfParse(buffer)
       rawText = pdfData.text
     } catch {
-      // Fallback: use raw buffer as text (won't be great but won't crash)
-      rawText = buffer.toString('utf-8').replace(/[^\x20-\x7E\n]/g, ' ')
+      await serviceClient
+        .from('candidates')
+        .update({ status: 'error' })
+        .eq('id', candidate.id)
+      return NextResponse.json({ candidate_id: candidate.id, warning: 'PDF text extraction failed' })
     }
 
     // Parse with LLM
@@ -80,7 +83,7 @@ export async function POST(req: NextRequest) {
         .update({
           raw_text: rawText,
           profile: candidateProfile,
-          full_name: nameMatch?.[1] || candidateProfile.summary.split(' ').slice(0, 2).join(' '),
+          full_name: nameMatch?.[1] || candidateProfile.summary?.split(' ').slice(0, 2).join(' ') || null,
           email: emailMatch?.[0] || null,
           status: 'parsed'
         })

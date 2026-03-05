@@ -230,6 +230,8 @@ function Bucket({ label, color, evaluations, onSelect }: {
 }
 
 // ─── Main page ─────────────────────────────────────────────
+const supabase = createClient()
+
 function EvaluatePageInner() {
   const searchParams = useSearchParams()
   const jobIdParam = searchParams.get('job_id')
@@ -240,7 +242,6 @@ function EvaluatePageInner() {
   const [evaluations, setEvaluations] = useState<Evaluation[]>([])
   const [running, setRunning] = useState(false)
   const [selected, setSelected] = useState<Evaluation | null>(null)
-  const supabase = createClient()
 
   useEffect(() => {
     supabase.from('job_ads').select('*').order('created_at', { ascending: false }).then(({ data }) => {
@@ -251,7 +252,7 @@ function EvaluatePageInner() {
       }
     })
     supabase.from('candidates').select('*').eq('status', 'parsed').then(({ data }) => setCandidates(data || []))
-  }, [])
+  }, [jobIdParam])
 
   useEffect(() => {
     if (!selectedJob) return
