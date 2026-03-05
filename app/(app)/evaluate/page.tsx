@@ -2,19 +2,18 @@
 import { useEffect, useState, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { JobAd, Candidate, Evaluation, Recommendation } from '@/types'
+import { JobAd, Candidate, Evaluation } from '@/types'
+import { toast } from 'sonner'
 
-// ─── Colors ────────────────────────────────────────────────
-const recColor = (r: string) => ({ 'STRONG SHORTLIST': '#00d4a0', 'CONSIDER': '#4a9eff', 'WEAK': '#f6ad55', 'REJECT': '#fc5c65' }[r] || '#4a5568')
-const verdictColor = (v: string) => ({ STRONG: '#00d4a0', ADEQUATE: '#4a9eff', WEAK: '#f6ad55', DISQUALIFYING: '#fc5c65' }[v] || '#4a5568')
-const statusColor = (s: string) => ({ MET: '#00d4a0', PARTIAL: '#f6ad55', MISSING: '#fc5c65' }[s] || '#4a5568')
+const recColor = (r: string) => ({ 'STRONG SHORTLIST': '#059669', 'CONSIDER': '#2563eb', 'WEAK': '#d97706', 'REJECT': '#dc2626' }[r] || '#6b7280')
+const recBg = (r: string) => ({ 'STRONG SHORTLIST': '#ecfdf5', 'CONSIDER': '#eff6ff', 'WEAK': '#fffbeb', 'REJECT': '#fef2f2' }[r] || '#f3f4f6')
+const verdictColor = (v: string) => ({ STRONG: '#059669', ADEQUATE: '#2563eb', WEAK: '#d97706', DISQUALIFYING: '#dc2626' }[v] || '#6b7280')
+const statusColor = (s: string) => ({ MET: '#059669', PARTIAL: '#d97706', MISSING: '#dc2626' }[s] || '#6b7280')
 
-// ─── Highlight job ad text ──────────────────────────────────
 function HighlightedJobAd({ rawText, spans }: { rawText: string, spans: string[] }) {
-  if (!spans.length) return <pre style={{ whiteSpace: 'pre-wrap', fontSize: '11px', lineHeight: '1.8', color: '#718096' }}>{rawText}</pre>
+  if (!spans.length) return <pre style={{ whiteSpace: 'pre-wrap', fontSize: '12px', lineHeight: '1.8', color: '#6b7280' }}>{rawText}</pre>
 
   let parts: { text: string, highlight: boolean }[] = [{ text: rawText, highlight: false }]
-
   spans.forEach(span => {
     if (!span) return
     parts = parts.flatMap(part => {
@@ -30,16 +29,15 @@ function HighlightedJobAd({ rawText, spans }: { rawText: string, spans: string[]
   })
 
   return (
-    <pre style={{ whiteSpace: 'pre-wrap', fontSize: '11px', lineHeight: '1.8', color: '#718096' }}>
+    <pre style={{ whiteSpace: 'pre-wrap', fontSize: '12px', lineHeight: '1.8', color: '#6b7280' }}>
       {parts.map((p, i) => p.highlight
-        ? <mark key={i} style={{ background: 'rgba(0,212,160,0.2)', color: '#00d4a0', borderRadius: '2px', padding: '0 2px' }}>{p.text}</mark>
+        ? <mark key={i} style={{ background: '#dcfce7', color: '#059669', borderRadius: '2px', padding: '0 2px' }}>{p.text}</mark>
         : <span key={i}>{p.text}</span>
       )}
     </pre>
   )
 }
 
-// ─── Candidate detail panel ────────────────────────────────
 function CandidateDetail({ evaluation, jobAd, onClose }: { evaluation: Evaluation, jobAd: JobAd, onClose: () => void }) {
   const [tab, setTab] = useState<'dimensions' | 'requirements' | 'jobad'>('dimensions')
   const result = evaluation.result
@@ -51,82 +49,79 @@ function CandidateDetail({ evaluation, jobAd, onClose }: { evaluation: Evaluatio
 
   return (
     <div style={{
-      position: 'fixed', right: 0, top: 0, bottom: 0, width: '520px',
-      background: '#0d1117', borderLeft: '1px solid #1a2030',
+      position: 'fixed', right: 0, top: 0, bottom: 0, width: '520px', maxWidth: '100vw',
+      background: 'white', borderLeft: '1px solid #e5e7eb',
       display: 'flex', flexDirection: 'column', zIndex: 100,
-      animation: 'slideIn 0.2s ease'
+      animation: 'slideIn 0.2s ease', boxShadow: '-4px 0 24px rgba(0,0,0,0.08)'
     }}>
       <style>{`@keyframes slideIn { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }`}</style>
 
-      {/* Panel header */}
-      <div style={{ padding: '20px 24px', borderBottom: '1px solid #1a2030', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div style={{ padding: '20px 24px', borderBottom: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
-          <div style={{ fontSize: '13px', color: '#e2e8f0', fontWeight: 600 }}>
+          <div style={{ fontSize: '15px', color: '#111827', fontWeight: 600 }}>
             {evaluation.candidate?.full_name || 'Candidate'}
           </div>
-          <div style={{ fontSize: '10px', color: recColor(evaluation.recommendation), marginTop: '2px', letterSpacing: '1px' }}>
+          <div style={{
+            fontSize: '11px', color: recColor(evaluation.recommendation), marginTop: '4px',
+            fontWeight: 600, letterSpacing: '0.5px',
+            background: recBg(evaluation.recommendation), padding: '2px 8px', borderRadius: '4px', display: 'inline-block'
+          }}>
             {evaluation.recommendation}
           </div>
         </div>
-        <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#4a5568', cursor: 'pointer', fontSize: '18px' }}>×</button>
+        <button onClick={onClose} aria-label="Close panel" style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', fontSize: '20px', padding: '4px' }}>×</button>
       </div>
 
-      {/* Recruiter summary */}
-      <div style={{ padding: '16px 24px', background: `${recColor(evaluation.recommendation)}0d`, borderBottom: '1px solid #1a2030' }}>
-        <div style={{ fontSize: '11px', color: '#a0aec0', lineHeight: '1.7' }}>{result.recruiter_summary}</div>
+      <div style={{ padding: '16px 24px', background: '#f9fafb', borderBottom: '1px solid #e5e7eb' }}>
+        <div style={{ fontSize: '13px', color: '#374151', lineHeight: '1.7' }}>{result.recruiter_summary}</div>
         {result.top_compensation && (
-          <div style={{ marginTop: '10px', fontSize: '10px', color: '#00d4a0', borderLeft: '2px solid #00d4a0', paddingLeft: '10px' }}>
-            ↗ {result.top_compensation}
+          <div style={{ marginTop: '10px', fontSize: '12px', color: '#059669', borderLeft: '2px solid #059669', paddingLeft: '10px' }}>
+            {result.top_compensation}
           </div>
         )}
       </div>
 
-      {/* Tabs */}
-      <div style={{ display: 'flex', borderBottom: '1px solid #1a2030' }}>
+      <div style={{ display: 'flex', borderBottom: '1px solid #e5e7eb' }}>
         {(['dimensions', 'requirements', 'jobad'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)} style={{
             flex: 1, padding: '12px', background: 'none',
-            border: 'none', borderBottom: tab === t ? '2px solid #00d4a0' : '2px solid transparent',
-            color: tab === t ? '#00d4a0' : '#4a5568', fontSize: '9px',
-            letterSpacing: '1.5px', textTransform: 'uppercase', cursor: 'pointer',
+            border: 'none', borderBottom: tab === t ? '2px solid #2563eb' : '2px solid transparent',
+            color: tab === t ? '#2563eb' : '#6b7280', fontSize: '12px',
+            fontWeight: tab === t ? 600 : 400, cursor: 'pointer',
             fontFamily: 'inherit', transition: 'all 0.15s'
           }}>
-            {t === 'jobad' ? 'Job Ad' : t}
+            {t === 'jobad' ? 'Job Ad' : t === 'dimensions' ? 'Dimensions' : 'Requirements'}
           </button>
         ))}
       </div>
 
-      {/* Tab content */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
-
-        {/* Dimensions tab */}
         {tab === 'dimensions' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             {result.dimensions?.map((dim, i) => (
               <div key={i} style={{
-                padding: '14px 16px', background: '#111827',
+                padding: '14px 16px', background: '#f9fafb',
                 borderLeft: `3px solid ${verdictColor(dim.verdict)}`,
-                borderRadius: '0 6px 6px 0', border: `1px solid ${verdictColor(dim.verdict)}25`,
-                borderLeftWidth: '3px'
+                borderRadius: '0 8px 8px 0', border: '1px solid #e5e7eb',
+                borderLeftWidth: '3px', borderLeftColor: verdictColor(dim.verdict)
               }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                  <div style={{ fontSize: '11px', color: '#e2e8f0', fontWeight: 600 }}>{dim.name}</div>
+                  <div style={{ fontSize: '13px', color: '#111827', fontWeight: 600 }}>{dim.name}</div>
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <span style={{ fontSize: '9px', color: '#4a5568' }}>{dim.confidence}</span>
+                    <span style={{ fontSize: '11px', color: '#9ca3af' }}>{dim.confidence}</span>
                     <span style={{
-                      fontSize: '9px', color: verdictColor(dim.verdict), letterSpacing: '1px',
-                      padding: '2px 6px', background: `${verdictColor(dim.verdict)}18`,
-                      borderRadius: '3px', fontWeight: 700
+                      fontSize: '11px', color: verdictColor(dim.verdict),
+                      padding: '2px 8px', background: `${verdictColor(dim.verdict)}15`,
+                      borderRadius: '4px', fontWeight: 600
                     }}>{dim.verdict}</span>
                   </div>
                 </div>
-                <div style={{ fontSize: '11px', color: '#718096', lineHeight: '1.6', fontStyle: 'italic' }}>"{dim.evidence}"</div>
+                <div style={{ fontSize: '12px', color: '#6b7280', lineHeight: '1.6', fontStyle: 'italic' }}>&ldquo;{dim.evidence}&rdquo;</div>
               </div>
             ))}
           </div>
         )}
 
-        {/* Requirements tab */}
         {tab === 'requirements' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {['must_have', 'nice_to_have', 'soft'].map(type => {
@@ -134,25 +129,23 @@ function CandidateDetail({ evaluation, jobAd, onClose }: { evaluation: Evaluatio
               if (!reqs.length) return null
               return (
                 <div key={type}>
-                  <div style={{ fontSize: '9px', letterSpacing: '2px', color: '#4a5568', marginBottom: '8px', marginTop: '8px', textTransform: 'uppercase' }}>
+                  <div style={{ fontSize: '11px', letterSpacing: '1px', color: '#9ca3af', marginBottom: '8px', marginTop: '8px', textTransform: 'uppercase', fontWeight: 600 }}>
                     {type === 'must_have' ? 'Must Haves' : type === 'nice_to_have' ? 'Nice to Haves' : 'Soft Signals'}
                   </div>
                   {reqs.map((r, i) => (
                     <div key={i} style={{
-                      padding: '12px 14px', background: '#111827', borderRadius: '6px',
-                      marginBottom: '6px', borderLeft: `3px solid ${statusColor(r.status)}`
+                      padding: '12px 14px', background: '#f9fafb', borderRadius: '8px',
+                      marginBottom: '6px', borderLeft: `3px solid ${statusColor(r.status)}`, border: '1px solid #e5e7eb',
+                      borderLeftWidth: '3px', borderLeftColor: statusColor(r.status)
                     }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                        <div style={{ fontSize: '11px', color: '#e2e8f0', flex: 1, paddingRight: '12px' }}>{r.requirement}</div>
-                        <span style={{
-                          fontSize: '9px', color: statusColor(r.status), letterSpacing: '1px',
-                          fontWeight: 700, flexShrink: 0
-                        }}>{r.status}</span>
+                        <div style={{ fontSize: '13px', color: '#111827', flex: 1, paddingRight: '12px' }}>{r.requirement}</div>
+                        <span style={{ fontSize: '11px', color: statusColor(r.status), fontWeight: 600, flexShrink: 0 }}>{r.status}</span>
                       </div>
                       {r.evidence && (
-                        <div style={{ fontSize: '10px', color: '#4a5568', lineHeight: '1.5', fontStyle: 'italic' }}>
+                        <div style={{ fontSize: '12px', color: '#6b7280', lineHeight: '1.5', fontStyle: 'italic' }}>
                           {r.cv_span
-                            ? <><span style={{ color: '#718096' }}>CV: </span><mark style={{ background: 'rgba(74,158,255,0.15)', color: '#4a9eff', borderRadius: '2px', padding: '0 2px' }}>{r.cv_span}</mark></>
+                            ? <><span style={{ color: '#9ca3af' }}>CV: </span><mark style={{ background: '#dbeafe', color: '#2563eb', borderRadius: '2px', padding: '0 2px' }}>{r.cv_span}</mark></>
                             : r.evidence
                           }
                         </div>
@@ -165,13 +158,12 @@ function CandidateDetail({ evaluation, jobAd, onClose }: { evaluation: Evaluatio
           </div>
         )}
 
-        {/* Job Ad tab with highlights */}
         {tab === 'jobad' && (
           <div>
-            <div style={{ fontSize: '9px', letterSpacing: '2px', color: '#4a5568', marginBottom: '12px' }}>
+            <div style={{ fontSize: '11px', letterSpacing: '1px', color: '#9ca3af', marginBottom: '12px', fontWeight: 600 }}>
               MATCHED REQUIREMENTS HIGHLIGHTED
             </div>
-            <div style={{ background: '#111827', borderRadius: '6px', padding: '16px' }}>
+            <div style={{ background: '#f9fafb', borderRadius: '8px', padding: '16px', border: '1px solid #e5e7eb' }}>
               <HighlightedJobAd rawText={jobAd.raw_text} spans={jobAdSpans} />
             </div>
           </div>
@@ -181,55 +173,53 @@ function CandidateDetail({ evaluation, jobAd, onClose }: { evaluation: Evaluatio
   )
 }
 
-// ─── Bucket column ─────────────────────────────────────────
 function Bucket({ label, color, evaluations, onSelect }: {
   label: string, color: string,
   evaluations: Evaluation[], onSelect: (e: Evaluation) => void
 }) {
   return (
-    <div style={{ flex: 1, minWidth: 0 }}>
+    <div style={{ flex: 1, minWidth: '200px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
         <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: color }} />
-        <div style={{ fontSize: '10px', letterSpacing: '2px', color, textTransform: 'uppercase' }}>{label}</div>
-        <div style={{ fontSize: '10px', color: '#4a5568', marginLeft: 'auto' }}>{evaluations.length}</div>
+        <div style={{ fontSize: '12px', fontWeight: 600, color }}>{label}</div>
+        <div style={{ fontSize: '12px', color: '#9ca3af', marginLeft: 'auto', background: '#f3f4f6', borderRadius: '10px', padding: '1px 8px' }}>{evaluations.length}</div>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {evaluations.map(ev => (
           <div key={ev.id}
             onClick={() => onSelect(ev)}
             style={{
-              padding: '14px', background: '#0d1117', border: `1px solid #1a2030`,
-              borderRadius: '6px', cursor: 'pointer', transition: 'border-color 0.15s',
+              padding: '14px', background: 'white', border: '1px solid #e5e7eb',
+              borderRadius: '8px', cursor: 'pointer', transition: 'all 0.15s',
               borderLeft: `3px solid ${color}`
             }}
-            onMouseEnter={e => (e.currentTarget.style.borderColor = color)}
-            onMouseLeave={e => (e.currentTarget.style.borderColor = '#1a2030')}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = color; e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.06)' }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.boxShadow = 'none' }}
           >
-            <div style={{ fontSize: '12px', color: '#e2e8f0', fontWeight: 500, marginBottom: '4px' }}>
+            <div style={{ fontSize: '13px', color: '#111827', fontWeight: 500, marginBottom: '4px' }}>
               {ev.candidate?.full_name || 'Candidate'}
             </div>
             {ev.candidate?.profile?.seniority && (
-              <div style={{ fontSize: '10px', color: '#4a5568' }}>
-                {ev.candidate.profile.seniority} · {ev.candidate.profile.domains?.[0]}
+              <div style={{ fontSize: '11px', color: '#9ca3af' }}>
+                {ev.candidate.profile.seniority}{ev.candidate.profile.domains?.[0] ? ` · ${ev.candidate.profile.domains[0]}` : ''}
               </div>
             )}
-            <div style={{ fontSize: '10px', color: '#718096', marginTop: '6px', lineHeight: '1.5' }}>
+            <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '6px', lineHeight: '1.5' }}>
               {ev.result?.recruiter_summary?.slice(0, 80)}...
             </div>
-            <div style={{ fontSize: '9px', color: color, marginTop: '8px', letterSpacing: '1px' }}>
+            <div style={{ fontSize: '11px', color, marginTop: '8px', fontWeight: 500 }}>
               View details →
             </div>
           </div>
         ))}
         {evaluations.length === 0 && (
-          <div style={{ fontSize: '10px', color: '#2d3748', padding: '20px 0', textAlign: 'center' }}>None</div>
+          <div style={{ fontSize: '12px', color: '#d1d5db', padding: '20px 0', textAlign: 'center', background: '#f9fafb', borderRadius: '8px', border: '1px dashed #e5e7eb' }}>None</div>
         )}
       </div>
     </div>
   )
 }
 
-// ─── Main page ─────────────────────────────────────────────
 const supabase = createClient()
 
 function EvaluatePageInner() {
@@ -244,14 +234,18 @@ function EvaluatePageInner() {
   const [selected, setSelected] = useState<Evaluation | null>(null)
 
   useEffect(() => {
-    supabase.from('job_ads').select('*').order('created_at', { ascending: false }).then(({ data }) => {
+    supabase.from('job_ads').select('*').order('created_at', { ascending: false }).then(({ data, error }) => {
+      if (error) toast.error('Failed to load jobs')
       setJobs(data || [])
       if (jobIdParam) {
         const job = (data || []).find((j: JobAd) => j.id === jobIdParam)
         if (job) setSelectedJob(job)
       }
     })
-    supabase.from('candidates').select('*').eq('status', 'parsed').then(({ data }) => setCandidates(data || []))
+    supabase.from('candidates').select('*').eq('status', 'parsed').then(({ data, error }) => {
+      if (error) toast.error('Failed to load candidates')
+      setCandidates(data || [])
+    })
   }, [jobIdParam])
 
   useEffect(() => {
@@ -259,20 +253,40 @@ function EvaluatePageInner() {
     supabase.from('evaluations')
       .select('*, candidate:candidates(*)')
       .eq('job_ad_id', selectedJob.id)
-      .then(({ data }) => setEvaluations(data || []))
+      .then(({ data, error }) => {
+        if (error) toast.error('Failed to load evaluations')
+        setEvaluations(data || [])
+      })
   }, [selectedJob])
 
   const runEvaluation = async () => {
     if (!selectedJob || !candidates.length) return
     setRunning(true)
     const unevaluated = candidates.filter(c => !evaluations.find(e => e.candidate_id === c.id))
-    if (!unevaluated.length) { setRunning(false); return }
+    if (!unevaluated.length) {
+      toast.info('All candidates have already been evaluated')
+      setRunning(false)
+      return
+    }
 
-    await fetch('/api/evaluate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ job_ad_id: selectedJob.id, candidate_ids: unevaluated.map(c => c.id) })
-    })
+    try {
+      const res = await fetch('/api/evaluate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ job_ad_id: selectedJob.id, candidate_ids: unevaluated.map(c => c.id) })
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        toast.error(data.error || 'Evaluation failed')
+      } else {
+        const failed = data.results?.filter((r: { error: string | null }) => r.error)?.length || 0
+        const succeeded = data.results?.filter((r: { error: string | null }) => !r.error)?.length || 0
+        if (succeeded > 0) toast.success(`${succeeded} candidate${succeeded > 1 ? 's' : ''} evaluated`)
+        if (failed > 0) toast.warning(`${failed} evaluation${failed > 1 ? 's' : ''} failed`)
+      }
+    } catch {
+      toast.error('Evaluation request failed')
+    }
 
     const { data } = await supabase.from('evaluations')
       .select('*, candidate:candidates(*)')
@@ -292,15 +306,14 @@ function EvaluatePageInner() {
 
   return (
     <div style={{ padding: '32px', minHeight: '100vh' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: '28px' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: '28px', flexWrap: 'wrap', gap: '16px' }}>
         <div>
-          <div style={{ fontSize: '10px', letterSpacing: '3px', color: '#4a5568', marginBottom: '6px' }}>EVALUATE</div>
-          <div style={{ fontSize: '24px', color: '#fff', fontWeight: 600 }}>
+          <div style={{ fontSize: '11px', letterSpacing: '2px', color: '#9ca3af', marginBottom: '6px', fontWeight: 600 }}>EVALUATE</div>
+          <h1 style={{ fontSize: '24px', color: '#111827', fontWeight: 600 }}>
             {selectedJob ? selectedJob.title : 'Select a job ad'}
-          </div>
+          </h1>
           {selectedJob && (
-            <div style={{ fontSize: '11px', color: '#4a5568', marginTop: '4px' }}>
+            <div style={{ fontSize: '13px', color: '#6b7280', marginTop: '4px' }}>
               {candidates.length} candidates in pool · {evaluations.length} evaluated
               {unevaluatedCount > 0 && ` · ${unevaluatedCount} pending`}
             </div>
@@ -310,51 +323,53 @@ function EvaluatePageInner() {
           <button
             onClick={runEvaluation} disabled={running}
             style={{
-              padding: '12px 24px', background: running ? 'transparent' : '#00d4a0',
-              border: '1px solid #00d4a0', borderRadius: '6px',
-              color: running ? '#00d4a0' : '#0a0c10', fontSize: '10px',
-              letterSpacing: '2px', cursor: running ? 'not-allowed' : 'pointer',
-              fontFamily: 'inherit', fontWeight: 600, opacity: running ? 0.6 : 1
+              padding: '12px 24px', background: running ? 'white' : '#2563eb',
+              border: running ? '1px solid #2563eb' : 'none', borderRadius: '8px',
+              color: running ? '#2563eb' : 'white', fontSize: '14px',
+              cursor: running ? 'not-allowed' : 'pointer',
+              fontFamily: 'inherit', fontWeight: 500, opacity: running ? 0.8 : 1
             }}
           >
-            {running ? 'Evaluating...' : `Run Evaluation (${unevaluatedCount})`}
+            {running ? `Evaluating ${unevaluatedCount} candidates...` : `Run Evaluation (${unevaluatedCount})`}
           </button>
         )}
       </div>
 
-      {/* Job selector */}
       <div style={{ display: 'flex', gap: '8px', marginBottom: '28px', flexWrap: 'wrap' }}>
-        {jobs.map(j => (
+        {jobs.filter(j => j.status === 'parsed').map(j => (
           <button key={j.id} onClick={() => setSelectedJob(j)} style={{
-            padding: '8px 14px', background: selectedJob?.id === j.id ? 'rgba(0,212,160,0.1)' : 'transparent',
-            border: selectedJob?.id === j.id ? '1px solid rgba(0,212,160,0.4)' : '1px solid #1a2030',
-            borderRadius: '6px', color: selectedJob?.id === j.id ? '#00d4a0' : '#4a5568',
-            fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s'
+            padding: '8px 14px',
+            background: selectedJob?.id === j.id ? '#eff6ff' : 'white',
+            border: selectedJob?.id === j.id ? '1px solid #2563eb' : '1px solid #e5e7eb',
+            borderRadius: '8px', color: selectedJob?.id === j.id ? '#2563eb' : '#374151',
+            fontSize: '13px', cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s',
+            fontWeight: selectedJob?.id === j.id ? 500 : 400
           }}>{j.title}</button>
         ))}
+        {jobs.filter(j => j.status === 'parsed').length === 0 && (
+          <div style={{ color: '#9ca3af', fontSize: '13px' }}>No parsed job ads yet. Create one first.</div>
+        )}
       </div>
 
-      {/* Buckets */}
       {selectedJob && (
-        <div style={{ display: 'flex', gap: '16px' }}>
-          <Bucket label="Strong Shortlist" color="#00d4a0" evaluations={buckets.green} onSelect={setSelected} />
-          <Bucket label="Consider" color="#4a9eff" evaluations={buckets.blue} onSelect={setSelected} />
-          <Bucket label="Weak" color="#f6ad55" evaluations={buckets.amber} onSelect={setSelected} />
-          <Bucket label="Reject" color="#fc5c65" evaluations={buckets.red} onSelect={setSelected} />
+        <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+          <Bucket label="Strong Shortlist" color="#059669" evaluations={buckets.green} onSelect={setSelected} />
+          <Bucket label="Consider" color="#2563eb" evaluations={buckets.blue} onSelect={setSelected} />
+          <Bucket label="Weak" color="#d97706" evaluations={buckets.amber} onSelect={setSelected} />
+          <Bucket label="Reject" color="#dc2626" evaluations={buckets.red} onSelect={setSelected} />
         </div>
       )}
 
       {!selectedJob && (
-        <div style={{ color: '#4a5568', fontSize: '11px', textAlign: 'center', padding: '80px 0', letterSpacing: '1px' }}>
+        <div style={{ color: '#9ca3af', fontSize: '13px', textAlign: 'center', padding: '80px 0' }}>
           Select a job ad above to start evaluating your CV pool
         </div>
       )}
 
-      {/* Detail panel */}
       {selected && selectedJob && (
         <>
           <div onClick={() => setSelected(null)} style={{
-            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 99
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.3)', zIndex: 99
           }} />
           <CandidateDetail evaluation={selected} jobAd={selectedJob} onClose={() => setSelected(null)} />
         </>
@@ -365,7 +380,7 @@ function EvaluatePageInner() {
 
 export default function EvaluatePage() {
   return (
-    <Suspense fallback={<div style={{ padding: '32px', color: '#4a5568', fontSize: '11px' }}>Loading...</div>}>
+    <Suspense fallback={<div style={{ padding: '32px', color: '#9ca3af', fontSize: '13px' }}>Loading...</div>}>
       <EvaluatePageInner />
     </Suspense>
   )

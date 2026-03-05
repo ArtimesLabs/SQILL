@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient, createServiceClient } from '@/lib/supabase/server'
 import { createLLMProvider } from '@/lib/llm/provider'
 
-export async function GET(req: NextRequest) {
+export async function GET() {
   try {
     const supabase = await createServerSupabaseClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -14,8 +14,9 @@ export async function GET(req: NextRequest) {
       .order('created_at', { ascending: false })
 
     return NextResponse.json({ jobs: jobs || [] })
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 })
+  } catch (err) {
+    console.error('Jobs GET error:', err)
+    return NextResponse.json({ error: 'Failed to load jobs' }, { status: 500 })
   }
 }
 
@@ -37,12 +38,11 @@ export async function POST(req: NextRequest) {
     const { title, raw_text } = await req.json()
 
     if (!title || !raw_text) {
-      return NextResponse.json({ error: 'title and raw_text required' }, { status: 400 })
+      return NextResponse.json({ error: 'Title and job description are required' }, { status: 400 })
     }
 
     const serviceClient = createServiceClient()
 
-    // Insert job ad
     const { data: jobAd, error } = await serviceClient
       .from('job_ads')
       .insert({
@@ -55,11 +55,14 @@ export async function POST(req: NextRequest) {
       .select()
       .single()
 
-    if (error) throw new Error(error.message)
+    if (error) {
+      console.error('Job insert failed:', error.message)
+      return NextResponse.json({ error: 'Failed to create job ad' }, { status: 500 })
+    }
 
-    // Parse with LLM
-    const llmProviderName = (profile as any).tenants?.llm_provider || 
-      process.env.DEFAULT_LLM_PROVIDER || 'anthropic'
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const llmProviderName = ((profile as any).tenants?.llm_provider || 
+      process.env.DEFAULT_LLM_PROVIDER || 'anthropic') as 'anthropic' | 'openai'
     const llm = createLLMProvider(llmProviderName)
 
     try {
@@ -68,7 +71,8 @@ export async function POST(req: NextRequest) {
         .from('job_ads')
         .update({ profile: jobProfile, status: 'parsed' })
         .eq('id', jobAd.id)
-    } catch {
+    } catch (e) {
+      console.error('Job LLM extraction failed:', e)
       await serviceClient
         .from('job_ads')
         .update({ status: 'error' })
@@ -76,8 +80,9 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({ job_ad_id: jobAd.id })
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 })
+  } catch (err) {
+    console.error('Jobs POST error:', err)
+    return NextResponse.json({ error: 'Failed to create job ad' }, { status: 500 })
   }
 }
 
@@ -88,9 +93,16 @@ export async function DELETE(req: NextRequest) {
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const { id } = await req.json()
-    await supabase.from('job_ads').delete().eq('id', id)
+    if (!id) return NextResponse.json({ error: 'Job ID is required' }, { status: 400 })
+
+    const { error } = await supabase.from('job_ads').delete().eq('id', id)
+    if (error) {
+      console.error('Job delete failed:', error.message)
+      return NextResponse.json({ error: 'Failed to delete job ad' }, { status: 500 })
+    }
     return NextResponse.json({ success: true })
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 })
+  } catch (err) {
+    console.error('Jobs DELETE error:', err)
+    return NextResponse.json({ error: 'Failed to delete job ad' }, { status: 500 })
   }
 }

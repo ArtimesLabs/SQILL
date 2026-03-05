@@ -2,6 +2,17 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient, createServiceClient } from '@/lib/supabase/server'
 import { createLLMProvider } from '@/lib/llm/provider'
 
+const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
+
+function sanitizeFilename(name: string): string {
+  return name
+    .replace(/\.\./g, '')
+    .replace(/[/\\]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/[^a-zA-Z0-9._-]/g, '')
+    || 'upload.pdf'
+}
+
 export async function POST(req: NextRequest) {
   try {
     const supabase = await createServerSupabaseClient()
@@ -24,18 +35,26 @@ export async function POST(req: NextRequest) {
     if (file.type !== 'application/pdf') {
       return NextResponse.json({ error: 'Only PDF files accepted' }, { status: 400 })
     }
+    if (file.size > MAX_FILE_SIZE) {
+      return NextResponse.json({ error: 'File too large. Maximum size is 10MB.' }, { status: 400 })
+    }
 
     const serviceClient = createServiceClient()
-    const storagePath = `${tenantId}/${Date.now()}-${file.name.replace(/\s+/g, '-')}`
+    const safeName = sanitizeFilename(file.name)
+    const storagePath = `${tenantId}/${Date.now()}-${safeName}`
 
-    // Upload to Supabase Storage
+    const arrayBuffer = await file.arrayBuffer()
+    const buffer = Buffer.from(arrayBuffer)
+
     const { error: uploadError } = await serviceClient.storage
       .from('cvs')
-      .upload(storagePath, file, { contentType: 'application/pdf' })
+      .upload(storagePath, buffer, { contentType: 'application/pdf' })
 
-    if (uploadError) throw new Error(`Storage upload failed: ${uploadError.message}`)
+    if (uploadError) {
+      console.error('Storage upload failed:', uploadError.message)
+      return NextResponse.json({ error: 'Failed to upload file' }, { status: 500 })
+    }
 
-    // Create candidate record as pending
     const { data: candidate, error: insertError } = await serviceClient
       .from('candidates')
       .insert({
@@ -47,18 +66,19 @@ export async function POST(req: NextRequest) {
       .select()
       .single()
 
-    if (insertError) throw new Error(`DB insert failed: ${insertError.message}`)
+    if (insertError) {
+      console.error('DB insert failed:', insertError.message)
+      return NextResponse.json({ error: 'Failed to create candidate record' }, { status: 500 })
+    }
 
-    // Extract text from PDF using pdf-parse
-    const arrayBuffer = await file.arrayBuffer()
-    const buffer = Buffer.from(arrayBuffer)
-    
     let rawText = ''
     try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const pdfParse = require('pdf-parse')
       const pdfData = await pdfParse(buffer)
       rawText = pdfData.text
-    } catch {
+    } catch (e) {
+      console.error('PDF parse failed:', e)
       await serviceClient
         .from('candidates')
         .update({ status: 'error' })
@@ -66,16 +86,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ candidate_id: candidate.id, warning: 'PDF text extraction failed' })
     }
 
-    // Parse with LLM
-    const llmProviderName = (profile as any).tenants?.llm_provider || 
-      process.env.DEFAULT_LLM_PROVIDER || 'anthropic'
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const llmProviderName = ((profile as any).tenants?.llm_provider || 
+      process.env.DEFAULT_LLM_PROVIDER || 'anthropic') as 'anthropic' | 'openai'
     const llm = createLLMProvider(llmProviderName)
 
     try {
       const candidateProfile = await llm.extractCandidateProfile(rawText)
-      
-      // Extract name and email from profile if possible
-      const nameMatch = rawText.match(/^([A-Z][a-z]+ [A-Z][a-z]+)/m)
       const emailMatch = rawText.match(/[\w.-]+@[\w.-]+\.\w+/)
 
       await serviceClient
@@ -83,12 +100,13 @@ export async function POST(req: NextRequest) {
         .update({
           raw_text: rawText,
           profile: candidateProfile,
-          full_name: nameMatch?.[1] || candidateProfile.summary?.split(' ').slice(0, 2).join(' ') || null,
+          full_name: candidateProfile.summary?.split(' ').slice(0, 2).join(' ') || null,
           email: emailMatch?.[0] || null,
           status: 'parsed'
         })
         .eq('id', candidate.id)
-    } catch {
+    } catch (e) {
+      console.error('LLM extraction failed:', e)
       await serviceClient
         .from('candidates')
         .update({ raw_text: rawText, status: 'error' })
@@ -96,7 +114,43 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({ candidate_id: candidate.id })
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 })
+  } catch (err) {
+    console.error('Candidates POST error:', err)
+    return NextResponse.json({ error: 'An unexpected error occurred' }, { status: 500 })
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const supabase = await createServerSupabaseClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+    const { id } = await req.json()
+    if (!id) return NextResponse.json({ error: 'Candidate ID is required' }, { status: 400 })
+
+    const { data: candidate } = await supabase
+      .from('candidates')
+      .select('id, storage_path')
+      .eq('id', id)
+      .single()
+
+    if (!candidate) return NextResponse.json({ error: 'Candidate not found' }, { status: 404 })
+
+    if (candidate.storage_path) {
+      const serviceClient = createServiceClient()
+      await serviceClient.storage.from('cvs').remove([candidate.storage_path])
+    }
+
+    const { error } = await supabase.from('candidates').delete().eq('id', id)
+    if (error) {
+      console.error('Candidate delete failed:', error.message)
+      return NextResponse.json({ error: 'Failed to delete candidate' }, { status: 500 })
+    }
+
+    return NextResponse.json({ success: true })
+  } catch (err) {
+    console.error('Candidates DELETE error:', err)
+    return NextResponse.json({ error: 'Failed to delete candidate' }, { status: 500 })
   }
 }

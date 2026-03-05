@@ -1,7 +1,3 @@
-// ============================================================
-// LLM Provider Abstraction
-// ============================================================
-
 import { EvaluationResult, CandidateProfile, JobProfile, JobAd, Candidate } from '@/types'
 
 export interface LLMProvider {
@@ -9,10 +5,6 @@ export interface LLMProvider {
   extractJobProfile(rawText: string): Promise<JobProfile>
   evaluateCandidate(candidate: Candidate, jobAd: JobAd): Promise<EvaluationResult>
 }
-
-// ============================================================
-// Shared prompts
-// ============================================================
 
 const CANDIDATE_EXTRACTION_PROMPT = `You are a precise CV parser. Extract structured information from the CV text.
 
@@ -82,18 +74,67 @@ Respond ONLY with valid JSON, no markdown.
   "top_compensation": "..."
 }`
 
+const MAX_INPUT_CHARS = 30000
+const FETCH_TIMEOUT_MS = 60000
+const MAX_RETRIES = 2
+const RETRY_DELAY_MS = 1000
+
+function truncateInput(text: string): string {
+  if (text.length <= MAX_INPUT_CHARS) return text
+  return text.slice(0, MAX_INPUT_CHARS) + '\n\n[Text truncated due to length]'
+}
+
+function parseJSON<T>(text: string): T {
+  const cleaned = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim()
+  if (!cleaned) throw new Error('Empty response from LLM')
+  return JSON.parse(cleaned)
+}
+
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number = FETCH_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch(url, { ...options, signal: controller.signal })
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function withRetry<T>(fn: () => Promise<T>, retries: number = MAX_RETRIES): Promise<T> {
+  let lastError: Error | null = null
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn()
+    } catch (err) {
+      lastError = err as Error
+      const msg = (err as Error)?.message || ''
+      const isRetryable = (err as Error)?.name === 'AbortError' ||
+        msg.includes('429') ||
+        msg.includes('500') ||
+        msg.includes('502') ||
+        msg.includes('503')
+      if (!isRetryable || attempt === retries) break
+      await new Promise(r => setTimeout(r, RETRY_DELAY_MS * (attempt + 1)))
+    }
+  }
+  throw lastError
+}
+
 function buildEvaluationUserMessage(candidate: Candidate, jobAd: JobAd): string {
-  return `CV:\n${candidate.raw_text}\n\nCANDIDATE PROFILE:\n${JSON.stringify(candidate.profile, null, 2)}\n\nJOB DESCRIPTION:\n${jobAd.raw_text}\n\nJOB PROFILE:\n${JSON.stringify(jobAd.profile, null, 2)}`
+  const cvText = truncateInput(candidate.raw_text || '')
+  const jobText = truncateInput(jobAd.raw_text)
+  return `CV:\n${cvText}\n\nCANDIDATE PROFILE:\n${JSON.stringify(candidate.profile, null, 2)}\n\nJOB DESCRIPTION:\n${jobText}\n\nJOB PROFILE:\n${JSON.stringify(jobAd.profile, null, 2)}`
 }
 
 function recommendationToScore(rec: string): number {
+  const normalized = (rec || '').trim().toUpperCase()
   const map: Record<string, number> = {
     'STRONG SHORTLIST': 92,
     'CONSIDER': 68,
     'WEAK': 35,
     'REJECT': 10
   }
-  return map[rec] ?? 50
+  return map[normalized] ?? 50
 }
 
 // ============================================================
@@ -108,37 +149,46 @@ export class AnthropicProvider implements LLMProvider {
   }
 
   private async call(system: string, user: string): Promise<string> {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': this.apiKey,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 2000,
-        system,
-        messages: [{ role: 'user', content: user }]
+    return withRetry(async () => {
+      const response = await fetchWithTimeout('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': this.apiKey,
+          'anthropic-version': '2023-06-01'
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 4096,
+          system,
+          messages: [{ role: 'user', content: user }]
+        })
       })
+
+      if (!response.ok) {
+        const body = await response.text().catch(() => '')
+        throw new Error(`Anthropic API error ${response.status}: ${body.slice(0, 200)}`)
+      }
+
+      const data = await response.json()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return data.content?.map((b: any) => b.text || '').join('') || ''
     })
-    const data = await response.json()
-    return data.content?.map((b: any) => b.text || '').join('') || ''
   }
 
   async extractCandidateProfile(rawText: string): Promise<CandidateProfile> {
-    const text = await this.call(CANDIDATE_EXTRACTION_PROMPT, rawText)
-    return JSON.parse(text.replace(/```json|```/g, '').trim())
+    const text = await this.call(CANDIDATE_EXTRACTION_PROMPT, truncateInput(rawText))
+    return parseJSON<CandidateProfile>(text)
   }
 
   async extractJobProfile(rawText: string): Promise<JobProfile> {
-    const text = await this.call(JOB_EXTRACTION_PROMPT, rawText)
-    return JSON.parse(text.replace(/```json|```/g, '').trim())
+    const text = await this.call(JOB_EXTRACTION_PROMPT, truncateInput(rawText))
+    return parseJSON<JobProfile>(text)
   }
 
   async evaluateCandidate(candidate: Candidate, jobAd: JobAd): Promise<EvaluationResult> {
     const text = await this.call(EVALUATION_SYSTEM_PROMPT, buildEvaluationUserMessage(candidate, jobAd))
-    return JSON.parse(text.replace(/```json|```/g, '').trim())
+    return parseJSON<EvaluationResult>(text)
   }
 }
 
@@ -154,39 +204,47 @@ export class OpenAIProvider implements LLMProvider {
   }
 
   private async call(system: string, user: string): Promise<string> {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.apiKey}`
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o',
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: user }
-        ],
-        response_format: { type: 'json_object' },
-        max_tokens: 2000
+    return withRetry(async () => {
+      const response = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.apiKey}`
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o',
+          messages: [
+            { role: 'system', content: system },
+            { role: 'user', content: user }
+          ],
+          response_format: { type: 'json_object' },
+          max_tokens: 4096
+        })
       })
+
+      if (!response.ok) {
+        const body = await response.text().catch(() => '')
+        throw new Error(`OpenAI API error ${response.status}: ${body.slice(0, 200)}`)
+      }
+
+      const data = await response.json()
+      return data.choices?.[0]?.message?.content || ''
     })
-    const data = await response.json()
-    return data.choices?.[0]?.message?.content || ''
   }
 
   async extractCandidateProfile(rawText: string): Promise<CandidateProfile> {
-    const text = await this.call(CANDIDATE_EXTRACTION_PROMPT, rawText)
-    return JSON.parse(text)
+    const text = await this.call(CANDIDATE_EXTRACTION_PROMPT, truncateInput(rawText))
+    return parseJSON<CandidateProfile>(text)
   }
 
   async extractJobProfile(rawText: string): Promise<JobProfile> {
-    const text = await this.call(JOB_EXTRACTION_PROMPT, rawText)
-    return JSON.parse(text)
+    const text = await this.call(JOB_EXTRACTION_PROMPT, truncateInput(rawText))
+    return parseJSON<JobProfile>(text)
   }
 
   async evaluateCandidate(candidate: Candidate, jobAd: JobAd): Promise<EvaluationResult> {
     const text = await this.call(EVALUATION_SYSTEM_PROMPT, buildEvaluationUserMessage(candidate, jobAd))
-    return JSON.parse(text)
+    return parseJSON<EvaluationResult>(text)
   }
 }
 

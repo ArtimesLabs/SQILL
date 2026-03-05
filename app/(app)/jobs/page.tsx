@@ -1,8 +1,11 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { JobAd } from '@/types'
 import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
+
+const supabase = createClient()
 
 export default function JobsPage() {
   const [jobs, setJobs] = useState<JobAd[]>([])
@@ -11,29 +14,64 @@ export default function JobsPage() {
   const [showForm, setShowForm] = useState(false)
   const [title, setTitle] = useState('')
   const [rawText, setRawText] = useState('')
-  const supabase = createClient()
+  const [search, setSearch] = useState('')
   const router = useRouter()
 
-  const load = async () => {
-    const { data } = await supabase.from('job_ads').select('*').order('created_at', { ascending: false })
+  const load = useCallback(async () => {
+    const { data, error } = await supabase.from('job_ads').select('*').order('created_at', { ascending: false })
+    if (error) {
+      toast.error('Failed to load jobs')
+      console.error(error)
+    }
     setJobs(data || [])
     setLoading(false)
-  }
+  }, [])
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [load])
 
   const create = async () => {
     if (!title.trim() || !rawText.trim()) return
     setCreating(true)
-    await fetch('/api/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, raw_text: rawText }) })
-    setTitle(''); setRawText(''); setShowForm(false)
-    await load()
+    try {
+      const res = await fetch('/api/jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, raw_text: rawText })
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        toast.error(data.error || 'Failed to create job ad')
+      } else {
+        toast.success('Job ad created successfully')
+        setTitle(''); setRawText(''); setShowForm(false)
+        await load()
+      }
+    } catch {
+      toast.error('Failed to create job ad')
+    }
     setCreating(false)
   }
 
-  const remove = async (id: string) => {
-    await supabase.from('job_ads').delete().eq('id', id)
+  const remove = async (id: string, jobTitle: string) => {
+    if (!confirm(`Delete "${jobTitle}"? This will also remove all evaluations for this job.`)) return
+    const prev = jobs
     setJobs(j => j.filter(x => x.id !== id))
+    try {
+      const res = await fetch('/api/jobs', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id })
+      })
+      if (!res.ok) {
+        setJobs(prev)
+        toast.error('Failed to delete job ad')
+      } else {
+        toast.success('Job ad deleted')
+      }
+    } catch {
+      setJobs(prev)
+      toast.error('Failed to delete job ad')
+    }
   }
 
   const statusBadge = (s: string) => {
@@ -45,9 +83,16 @@ export default function JobsPage() {
     return map[s] || { bg: '#f3f4f6', color: '#6b7280', label: s }
   }
 
+  const filtered = jobs.filter(j => {
+    if (!search) return true
+    const q = search.toLowerCase()
+    return j.title.toLowerCase().includes(q) ||
+      j.profile?.domains?.some(d => d.toLowerCase().includes(q))
+  })
+
   return (
     <div style={{ padding: '32px', maxWidth: '860px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '28px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '28px', flexWrap: 'wrap', gap: '12px' }}>
         <div>
           <h1 style={{ fontSize: '22px', fontWeight: 700, color: '#111827', marginBottom: '4px' }}>Job Ads</h1>
           <p style={{ color: '#6b7280', fontSize: '14px' }}>{jobs.length} open roles</p>
@@ -71,29 +116,43 @@ export default function JobsPage() {
         </div>
       )}
 
+      {jobs.length > 0 && (
+        <div style={{ marginBottom: '16px' }}>
+          <input
+            type="text" placeholder="Search jobs..."
+            value={search} onChange={e => setSearch(e.target.value)}
+            style={{ width: '100%', maxWidth: '400px', padding: '8px 12px', border: '1px solid #e5e7eb', borderRadius: '8px', outline: 'none', color: '#111827' }}
+          />
+        </div>
+      )}
+
       {loading ? (
         <div style={{ color: '#9ca3af', textAlign: 'center', padding: '40px 0' }}>Loading...</div>
       ) : jobs.length === 0 ? (
         <div style={{ color: '#9ca3af', textAlign: 'center', padding: '40px 0' }}>No job ads yet.</div>
+      ) : filtered.length === 0 ? (
+        <div style={{ color: '#9ca3af', textAlign: 'center', padding: '40px 0' }}>No jobs match your search.</div>
       ) : (
         <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '10px', overflow: 'hidden' }}>
-          {jobs.map((j, i) => {
+          {filtered.map((j, i) => {
             const badge = statusBadge(j.status)
             return (
               <div key={j.id} onClick={() => router.push(`/evaluate?job_id=${j.id}`)}
-                style={{ display: 'flex', alignItems: 'center', padding: '14px 18px', borderBottom: i < jobs.length - 1 ? '1px solid #f3f4f6' : 'none', cursor: 'pointer' }}
+                style={{ display: 'flex', alignItems: 'center', padding: '14px 18px', borderBottom: i < filtered.length - 1 ? '1px solid #f3f4f6' : 'none', cursor: 'pointer' }}
                 onMouseEnter={e => (e.currentTarget.style.background = '#f9fafb')}
                 onMouseLeave={e => (e.currentTarget.style.background = 'white')}>
                 <div style={{ width: '36px', height: '36px', background: '#eff6ff', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: '14px', flexShrink: 0, fontSize: '16px' }}>📋</div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 500, color: '#111827' }}>{j.title}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 500, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{j.title}</div>
                   <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px' }}>
                     {j.profile?.must_haves?.length || 0} must-haves · {new Date(j.created_at).toLocaleDateString()}
                   </div>
                 </div>
-                <span style={{ fontSize: '12px', fontWeight: 500, color: badge.color, background: badge.bg, padding: '3px 10px', borderRadius: '20px', marginRight: '12px' }}>{badge.label}</span>
-                <span style={{ fontSize: '13px', color: '#2563eb', marginRight: '12px', fontWeight: 500 }}>Evaluate →</span>
-                <button onClick={e => { e.stopPropagation(); remove(j.id) }} style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', fontSize: '18px' }}>×</button>
+                <span style={{ fontSize: '12px', fontWeight: 500, color: badge.color, background: badge.bg, padding: '3px 10px', borderRadius: '20px', marginRight: '12px', flexShrink: 0 }}>{badge.label}</span>
+                <span style={{ fontSize: '13px', color: '#2563eb', marginRight: '12px', fontWeight: 500, flexShrink: 0 }}>Evaluate →</span>
+                <button onClick={e => { e.stopPropagation(); remove(j.id, j.title) }}
+                  aria-label={`Delete ${j.title}`}
+                  style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', fontSize: '18px', padding: '4px 8px', borderRadius: '4px' }}>×</button>
               </div>
             )
           })}

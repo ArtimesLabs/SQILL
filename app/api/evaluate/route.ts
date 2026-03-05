@@ -3,6 +3,8 @@ import { createServerSupabaseClient, createServiceClient } from '@/lib/supabase/
 import { createLLMProvider, recommendationToScore } from '@/lib/llm/provider'
 import { Candidate, JobAd } from '@/types'
 
+const MAX_CANDIDATES_PER_REQUEST = 50
+
 export async function POST(req: NextRequest) {
   try {
     const supabase = await createServerSupabaseClient()
@@ -11,10 +13,13 @@ export async function POST(req: NextRequest) {
 
     const { job_ad_id, candidate_ids } = await req.json()
     if (!job_ad_id || !candidate_ids?.length) {
-      return NextResponse.json({ error: 'job_ad_id and candidate_ids required' }, { status: 400 })
+      return NextResponse.json({ error: 'Job ad and candidate selection required' }, { status: 400 })
     }
 
-    // Get tenant + LLM provider preference
+    if (candidate_ids.length > MAX_CANDIDATES_PER_REQUEST) {
+      return NextResponse.json({ error: `Maximum ${MAX_CANDIDATES_PER_REQUEST} candidates per evaluation run` }, { status: 400 })
+    }
+
     const { data: profile } = await supabase
       .from('profiles')
       .select('tenant_id, tenants(llm_provider)')
@@ -24,10 +29,10 @@ export async function POST(req: NextRequest) {
     if (!profile) return NextResponse.json({ error: 'Profile not found' }, { status: 404 })
 
     const tenantId = profile.tenant_id
-    const llmProviderName = (profile as any).tenants?.llm_provider || 
-      process.env.DEFAULT_LLM_PROVIDER || 'anthropic'
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const llmProviderName = ((profile as any).tenants?.llm_provider || 
+      process.env.DEFAULT_LLM_PROVIDER || 'anthropic') as 'anthropic' | 'openai'
 
-    // Fetch job ad
     const { data: jobAd } = await supabase
       .from('job_ads')
       .select('*')
@@ -37,7 +42,6 @@ export async function POST(req: NextRequest) {
 
     if (!jobAd) return NextResponse.json({ error: 'Job ad not found' }, { status: 404 })
 
-    // Fetch candidates
     const { data: candidates } = await supabase
       .from('candidates')
       .select('*')
@@ -53,7 +57,6 @@ export async function POST(req: NextRequest) {
     const serviceClient = createServiceClient()
     const results = []
 
-    // Run evaluations (parallel with concurrency limit)
     const CONCURRENCY = 3
     for (let i = 0; i < candidates.length; i += CONCURRENCY) {
       const batch = candidates.slice(i, i + CONCURRENCY)
@@ -63,7 +66,6 @@ export async function POST(req: NextRequest) {
             const evalResult = await llm.evaluateCandidate(candidate, jobAd as JobAd)
             const score = recommendationToScore(evalResult.overall_recommendation)
 
-            // Upsert evaluation
             const { data: evaluation } = await serviceClient
               .from('evaluations')
               .upsert({
@@ -79,8 +81,9 @@ export async function POST(req: NextRequest) {
               .single()
 
             return { candidate_id: candidate.id, evaluation, error: null }
-          } catch (err: any) {
-            return { candidate_id: candidate.id, evaluation: null, error: err.message }
+          } catch (err) {
+            console.error(`Evaluation failed for candidate ${candidate.id}:`, err)
+            return { candidate_id: candidate.id, evaluation: null, error: 'Evaluation failed' }
           }
         })
       )
@@ -88,7 +91,8 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({ results })
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 })
+  } catch (err) {
+    console.error('Evaluate POST error:', err)
+    return NextResponse.json({ error: 'Evaluation failed' }, { status: 500 })
   }
 }
