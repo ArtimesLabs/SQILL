@@ -1,36 +1,91 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# SQILL — Setup Guide
 
-## Getting Started
+## 1. Supabase (do this first)
 
-First, run the development server:
+1. Go to your Supabase project → **SQL Editor**
+2. Paste the entire contents of `supabase/schema.sql` and run it
+3. Go to **Authentication → Providers → Google** and enable it
+   - Add your Google OAuth credentials (from Google Cloud Console)
+   - Set redirect URL to: `https://sqill.ai/auth/callback`
+4. Go to **Project Settings → API** and copy:
+   - `NEXT_PUBLIC_SUPABASE_URL`
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `SUPABASE_SERVICE_ROLE_KEY`
 
+## 2. Drop files into your repo
+
+Copy all files into your existing Next.js 14 repo, merging with your existing structure.
+
+If starting fresh:
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npx create-next-app@14 sqill --typescript --tailwind --app
+```
+Then replace the generated files with these.
+
+## 3. Environment variables in Vercel
+
+In your Vercel project → Settings → Environment Variables, add:
+
+```
+NEXT_PUBLIC_SUPABASE_URL
+NEXT_PUBLIC_SUPABASE_ANON_KEY
+SUPABASE_SERVICE_ROLE_KEY
+ANTHROPIC_API_KEY
+OPENAI_API_KEY
+DEFAULT_LLM_PROVIDER=anthropic
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## 4. Cloudflare domain
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Your sqill.ai domain on Cloudflare should already point to Vercel.
+Make sure in Vercel → Domains that `sqill.ai` is added.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 5. Push to GitHub
 
-## Learn More
+```bash
+git add .
+git commit -m "feat: SQILL v1 - CV pool, job ads, rubric evaluation"
+git push origin main
+```
 
-To learn more about Next.js, take a look at the following resources:
+Vercel auto-deploys. Visit sqill.ai — done.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+---
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## File structure
 
-## Deploy on Vercel
+```
+app/
+├── login/page.tsx          → Google SSO login
+├── auth/callback/route.ts  → OAuth callback
+├── (app)/
+│   ├── layout.tsx          → Sidebar nav + auth guard
+│   ├── candidates/page.tsx → CV pool (upload, manage)
+│   ├── jobs/page.tsx       → Job ads (create, manage)
+│   └── evaluate/page.tsx   → Buckets + detail panel
+├── api/
+│   ├── candidates/route.ts → Upload + parse CV
+│   ├── jobs/route.ts       → Job ad CRUD + parse
+│   └── evaluate/route.ts   → Run evaluation engine
+lib/
+├── llm/provider.ts         → Anthropic + OpenAI abstraction
+└── supabase/client.ts      → Browser + server + service clients
+types/index.ts              → All TypeScript types
+middleware.ts               → Auth guard + redirects
+supabase/schema.sql         → Full DB schema + RLS
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## How it works
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+1. Recruiter uploads PDFs → parsed async → structured CandidateProfile stored
+2. Recruiter creates job ad → parsed → structured JobProfile stored
+3. Recruiter clicks Evaluate → engine runs rubric evaluation per candidate:
+   - Hard filter (binary disqualifiers)
+   - 5-dimension LLM judgment (Capability, Domain, Seniority, Trajectory, Risk)
+   - Requirements mapping (must-haves, nice-to-haves, soft signals)
+   - Job ad highlighting (matched spans)
+4. Results bucketed: Strong Shortlist / Consider / Weak / Reject
+5. Recruiter clicks any card → detail panel with 3 tabs:
+   - Dimensions (the 5-dimension verdict)
+   - Requirements (line-by-line mapping)
+   - Job Ad (highlighted matches)
