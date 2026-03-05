@@ -4,7 +4,9 @@ import { createServerClient } from '@supabase/ssr'
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
-  const response = NextResponse.next()
+  let response = NextResponse.next({
+    request: { headers: request.headers },
+  })
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -12,10 +14,11 @@ export async function middleware(request: NextRequest) {
     {
       cookies: {
         getAll() { return request.cookies.getAll() },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) =>
+        setAll(cookiesToSet: { name: string; value: string; options?: Record<string, unknown> }[]) {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            request.cookies.set(name, value)
             response.cookies.set(name, value, options)
-          )
+          })
         }
       }
     }
@@ -23,19 +26,24 @@ export async function middleware(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser()
 
-  // Redirect unauthenticated users to login
+  const redirect = (url: string) => {
+    const redirectResponse = NextResponse.redirect(new URL(url, request.url))
+    response.cookies.getAll().forEach(cookie => {
+      redirectResponse.cookies.set(cookie.name, cookie.value)
+    })
+    return redirectResponse
+  }
+
   if (!user && !pathname.startsWith('/login') && !pathname.startsWith('/auth')) {
-    return NextResponse.redirect(new URL('/login', request.url))
+    return redirect('/login')
   }
 
-  // Redirect authenticated users away from login
   if (user && pathname === '/login') {
-    return NextResponse.redirect(new URL('/candidates', request.url))
+    return redirect('/candidates')
   }
 
-  // Redirect root to candidates
   if (pathname === '/') {
-    return NextResponse.redirect(new URL(user ? '/candidates' : '/login', request.url))
+    return redirect(user ? '/candidates' : '/login')
   }
 
   return response
